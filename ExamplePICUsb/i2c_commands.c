@@ -2,6 +2,7 @@
 #include <i2c.h>
 
 #include "../yasp.h"
+#include "cmd_def.h"
 
 uint16_t BigEndianArrayToUint16(uint8_t * array)
 {
@@ -36,9 +37,6 @@ void i2c_write_command(uint8_t * payload, uint8_t payload_len) {
     controlByte = payload[I2CWR_CTRLBYTE_POS];
     I2C_Write(controlByte, payload+I2CWR_DATA_POS, length);
 }
-
-#define CMD_I2C_WRITE   1
-#define CMD_I2C_READ    2
 
 void init_i2c_commands() {
     TRISBbits.TRISB0 = 0;
