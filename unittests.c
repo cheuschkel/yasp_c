@@ -10,7 +10,7 @@
 #define CMD_TEST_CALLBACK       1
 #define CMD_TEST_CALLBACK2      2
 #define CMD_TEST_NOT_REGISTERED 3
-#define COMMAND_POS             4
+#define COMMAND_POS             3
 
 #define SERIAL_BUFFER_SIZE      0xFFFF
 #define CRC32_SIZE              4
@@ -81,13 +81,13 @@ TEST_TEAR_DOWN(YASP)
 TEST(YASP, TestCommandLength)
 {
     uint8_t payload_buffer[] = { 0xAA, 0xBB };
-    uint8_t command = CMD_TEST_CALLBACK;
+    uint16_t command = CMD_TEST_CALLBACK;
     uint16_t command_size_calc = 0;
     uint16_t command_size_buff = 0;
 
     send_yasp_command(command, payload_buffer, sizeof(payload_buffer), false);
     command_size_calc = sizeof(command) + sizeof(command_size_calc) + sizeof(payload_buffer);
-    command_size_buff = (last_serial_tx[2] << 8) | last_serial_tx[3];
+    command_size_buff = (last_serial_tx[1] << 8) | last_serial_tx[2];
 
     TEST_ASSERT_EQUAL_HEX16(command_size_calc, command_size_buff);
 }
@@ -99,7 +99,7 @@ TEST(YASP, TestOneCommandRegister)
     uint8_t payload_buffer[] = { 0xAA, 0xBB };
     uint16_t bytes_sent;
 
-    register_yasp_command((void (*)(uint8_t *, uint16_t)) mock_callback, CMD_TEST_CALLBACK);
+    register_yasp_command(mock_callback, CMD_TEST_CALLBACK);
     send_yasp_command(CMD_TEST_CALLBACK, payload_buffer, sizeof(payload_buffer), false);
     bytes_sent = tx_buffer_len;
     handled = rx_callback(last_serial_tx, tx_buffer_len);
@@ -114,13 +114,13 @@ TEST(YASP, TestAnotherCommandRegister)
     uint8_t payload_buffer[] = { 0xAA, 0xBB, 0xCC };
     uint8_t payload_buffer2[] = { 0xDD, 0xEE, 0xFF };
     
-    register_yasp_command((void (*)(uint8_t *, uint16_t)) mock_callback, CMD_TEST_CALLBACK);
+    register_yasp_command(mock_callback, CMD_TEST_CALLBACK);
     send_yasp_command(CMD_TEST_CALLBACK, payload_buffer, sizeof(payload_buffer), false);
     handled = rx_callback(last_serial_tx, tx_buffer_len);
     TEST_ASSERT_EQUAL_HEX16(1, number_of_mock_cb);
     TEST_ASSERT_EQUAL_HEX16(tx_buffer_len, handled);
     
-    register_yasp_command((void (*)(uint8_t *, uint16_t)) mock_callback2, CMD_TEST_CALLBACK2);
+    register_yasp_command(mock_callback2, CMD_TEST_CALLBACK2);
     send_yasp_command(CMD_TEST_CALLBACK2, payload_buffer2, sizeof(payload_buffer2), false);
     handled = rx_callback(last_serial_tx, tx_buffer_len);
     TEST_ASSERT_EQUAL_HEX16(tx_buffer_len, handled);
@@ -131,13 +131,9 @@ TEST(YASP, TestNoSynch)
 {
     uint16_t handled = 0xFFFF;
     uint8_t command_buffer[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09 };
-    register_yasp_command((void (*)(uint8_t *, uint16_t)) mock_callback2, CMD_TEST_CALLBACK2);
+    send_yasp_command(CMD_TEST_CALLBACK2, command_buffer, sizeof(command_buffer), false);
     handled = rx_callback(command_buffer, (uint16_t)(sizeof(command_buffer)));
-    TEST_ASSERT_EQUAL_HEX16(sizeof(command_buffer), handled);
-    command_buffer[3] = 0xFF;
-    command_buffer[4] = 0xFF;
-    handled = rx_callback(command_buffer, (uint16_t)(sizeof(command_buffer)));
-    TEST_ASSERT_EQUAL_HEX16(3, handled);
+    TEST_ASSERT_EQUAL_HEX16(4, handled);
 }
 
 TEST(YASP, TestCorrupt)
@@ -149,7 +145,7 @@ TEST(YASP, TestCorrupt)
     uint16_t error_string_idx = 0;
     uint16_t command_size = 0;
     
-    register_yasp_command((void (*)(uint8_t *, uint16_t)) mock_callback, CMD_TEST_CALLBACK);
+    register_yasp_command(mock_callback, CMD_TEST_CALLBACK);
     send_yasp_command(CMD_TEST_CALLBACK, payload_buffer, sizeof(payload_buffer), false);
     handled = rx_callback(last_serial_tx, tx_buffer_len);
     
@@ -190,8 +186,8 @@ TEST(YASP, TestDoubleCommand)
     uint8_t payload_buffer_2[] = { 0x44 };
     uint16_t command_size;
 
-    register_yasp_command((void (*)(uint8_t *, uint16_t)) mock_callback, CMD_TEST_CALLBACK);
-    register_yasp_command((void (*)(uint8_t *, uint16_t)) mock_callback2, CMD_TEST_CALLBACK2);
+    register_yasp_command(mock_callback, CMD_TEST_CALLBACK);
+    register_yasp_command(mock_callback2, CMD_TEST_CALLBACK2);
     send_yasp_command(CMD_TEST_CALLBACK, payload_buffer_1, sizeof(payload_buffer_1), false);
     send_yasp_command(CMD_TEST_CALLBACK2, payload_buffer_2, sizeof(payload_buffer_2), false);
 

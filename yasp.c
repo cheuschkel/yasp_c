@@ -11,28 +11,28 @@
 #include "crc32/crc32.h"
 
 static command_callback command_callbacks[REGISTRY_LENGTH];
-static uint8_t commands[REGISTRY_LENGTH];
+static uint16_t commands[REGISTRY_LENGTH];
 static uint8_t registered_commands = 0;
 
-void register_yasp_command(command_callback callback, uint8_t command) {
+void register_yasp_command(command_callback callback, uint16_t command) {
     commands[registered_commands] = command;
     command_callbacks[registered_commands] = callback;
     registered_commands += 1;
 }
 
-#define SYNCH_BYTE              0xFF
-#define NUM_SYNCH_BYTES         2
+#define SYNCH_BYTE              0x05
+#define NUM_SYNCH_BYTES         1
 #define MINIMUM_PACKET_SIZE     9
 #define CRC32_SIZE              4
-#define COMMAND_SIZE            1
+#define COMMAND_SIZE            2
 #define COMMAND_LENGTH_SIZE     2
 
 /* Packet Structure */
-#define SYNCH1_POS              0
-#define SYNCH2_POS              1
-#define START_CRC32_POS         2
-#define LENGTH_POS              2  // Synch is not included in command length or CRC
-#define COMMAND_POS             4
+#define SYNCH_POS               0
+#define START_CRC32_POS         1
+#define LENGTH_POS              1  
+#define COMMAND_POS             3
+#define PAYLOAD_POS             5
 
 /* Return Codes */
 #define RET_CMD_INCOMPLETE      -1
@@ -53,7 +53,7 @@ int16_t process_yasp(uint8_t *buffer, uint16_t length)
         return RET_CMD_INCOMPLETE;
     }
     
-    if ((buffer[SYNCH1_POS] != SYNCH_BYTE) || (buffer[SYNCH2_POS] != SYNCH_BYTE))
+    if (buffer[SYNCH_POS] != SYNCH_BYTE)
     {
         return RET_CMD_NOSYNCH;
     }
@@ -90,9 +90,12 @@ int16_t process_yasp(uint8_t *buffer, uint16_t length)
     /* Check if command has been registered; return error otherwise. */
     for (i = 0; i < registered_commands; i++)
     {
-        if (commands[i] == buffer[COMMAND_POS]) 
+        uint16_t cmd =  ((uint16_t)buffer[COMMAND_POS] << 8) + 
+                        buffer[COMMAND_POS + 1]; 
+
+        if (commands[i] == cmd) 
         {
-            command_callbacks[i](buffer + COMMAND_POS + 1, cmd_len-3);
+            command_callbacks[i](&buffer[PAYLOAD_POS], cmd_len - CRC32_SIZE);
             break;
         }
     }
@@ -105,27 +108,46 @@ int16_t process_yasp(uint8_t *buffer, uint16_t length)
     return (NUM_SYNCH_BYTES + cmd_len + CRC32_SIZE);
 }
 
-void send_yasp_command(uint8_t cmd, uint8_t * payload, uint16_t length, uint8_t ack)
+void send_yasp_command(uint16_t cmd, uint8_t * payload, uint16_t length, uint8_t ack)
 {
-    uint8_t out_buffer[2+2+1];
-    uint32_t crc_32 = 0x00;
-    uint8_t crc_buffer[sizeof(crc_32)];
+    uint8_t out_buffer[NUM_SYNCH_BYTES + COMMAND_LENGTH_SIZE + COMMAND_SIZE];
+    uint8_t crc_buffer[CRC32_SIZE];
+    uint32_t crc_32 = 0;
     uint16_t command_length = COMMAND_SIZE + COMMAND_LENGTH_SIZE + length; 
-    out_buffer[SYNCH1_POS] = 0xFF;
-    out_buffer[SYNCH2_POS] = 0xFF;
+    out_buffer[SYNCH_POS] = SYNCH_BYTE;
     out_buffer[LENGTH_POS] = (uint8_t)(command_length >> 8);
     out_buffer[LENGTH_POS+1] = (uint8_t)(command_length);
-    out_buffer[COMMAND_POS] = ack ? (0x80 | cmd) : cmd;
-    serial_tx(out_buffer, 5);
-    crc_32 = crc32(crc_32, &out_buffer[2], 3);
+    /* Add leading ack bit if necessary */
+    cmd = ack ? (0x80 | cmd) : cmd;
+    out_buffer[COMMAND_POS] = (uint8_t)(cmd >> 8);
+    out_buffer[COMMAND_POS+1] = (uint8_t)(cmd);
+    serial_tx(out_buffer, sizeof(out_buffer));
+    crc_32 = crc32(crc_32, &out_buffer[LENGTH_POS], 4);
     if (length > 0)
     {
         crc_32 = crc32(crc_32, payload, length);
         serial_tx(payload, length);
     }
     crc32_serialize(crc_32, crc_buffer);
-    serial_tx(crc_buffer, sizeof(crc_32));
+    serial_tx(crc_buffer, CRC32_SIZE); 
 
+#if defined DEBUG_YASP
+    int i = 0;
+    printf("\nYASP TX message: \t\t");
+    for(i= 0; i < sizeof(out_buffer); i++)
+    {
+        printf("%02x ", out_buffer[i]);
+    }
+    for(i= 0; i < length; i++)
+    {
+        printf("%02x ", payload[i]);
+    }
+    for(i= 0; i < sizeof(crc_buffer); i++)
+    {
+        printf("%02x ", crc_buffer[i]);
+    }
+    printf("\r\n");
+#endif
 }
 
 uint8_t ack_buffer[16];
@@ -134,8 +156,7 @@ uint16_t yasp_rx(uint8_t *cmd_buffer, uint16_t buffer_len)
 {
     int16_t return_code = 0;
     uint16_t handled = 0;
-    //sprintf(ack_buffer, "RX(%d,%d):%02x%02x%02x%02x%02x", return_code, buffer_len, cmd_buffer[3], cmd_buffer[4], cmd_buffer[5], cmd_buffer[6], cmd_buffer[7]);
-    //serial_tx(ack_buffer, 30);
+    
     while(1)
     {
         return_code = process_yasp(cmd_buffer+handled, buffer_len-handled);
